@@ -305,7 +305,7 @@ These are the three main liveness hazards in concurrent programming — situatio
 
 Virtual threads are lightweight threads managed by the JVM, not the OS. While a traditional platform thread maps 1:1 to an OS thread and consumes ~1MB of stack memory, a virtual thread is much cheaper (~few KB) and can be created by the millions. This makes the "one thread per task" model viable even for highly concurrent I/O-bound applications.
 
-See module 03 for full virtual thread coverage. This module contrasts virtual threads with platform threads to highlight when each is appropriate.
+See **Module 03 — Java 18 to 24 Features** for full virtual thread coverage. This module contrasts virtual threads with platform threads to highlight when each is appropriate.
 
 ---
 
