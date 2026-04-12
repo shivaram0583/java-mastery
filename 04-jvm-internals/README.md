@@ -264,4 +264,323 @@ Understanding bytecode helps you:
 | Garbage Collection | `GarbageCollectionDemo.java` | — |
 | JIT Compilation | `JitDemo.java` | — |
 | Bytecode | `BytecodeDemo.java` | — |
+| Memory Tuning | `MemoryTuningDemo.java` | — |
+| Practice Problems | `JvmPracticeProblems.java` | — |
 | JVM Flags | See README for flags reference | — |
+
+---
+
+## Interview Questions
+
+### JVM Architecture
+
+**Q1: Explain the JVM architecture. What are the main components?**
+
+The JVM has three main subsystems:
+1. **Class Loader Subsystem** — Loads `.class` files into memory, verifies bytecode, resolves symbolic references, and initializes static variables and blocks.
+2. **Runtime Data Areas** — Memory regions used during execution:
+   - **Heap** — Shared by all threads; stores all objects and arrays
+   - **Stack** — Per-thread; stores local variables, method call frames, partial results
+   - **Method Area (Metaspace)** — Stores class metadata, constant pool, static variables
+   - **PC Register** — Per-thread; holds address of current executing instruction
+   - **Native Method Stack** — Per-thread; for native (JNI) method calls
+3. **Execution Engine** — Interprets or compiles bytecode to native code:
+   - Interpreter, JIT Compiler (C1/C2), Garbage Collector
+
+**Q2: What is the difference between JDK, JRE, and JVM?**
+
+```
+  JDK (Java Development Kit)
+  ┌─────────────────────────────────────────┐
+  │  javac, jdb, jconsole, jshell, etc.     │ ← Development tools
+  │  ┌─────────────────────────────────┐    │
+  │  │  JRE (Java Runtime Environment) │    │
+  │  │  ┌─────────────────────────┐    │    │
+  │  │  │  JVM (Virtual Machine)  │    │    │ ← Executes bytecode
+  │  │  └─────────────────────────┘    │    │
+  │  │  rt.jar / core libraries        │    │ ← Standard library
+  │  └─────────────────────────────────┘    │
+  └─────────────────────────────────────────┘
+```
+
+- **JVM** — The virtual machine that executes bytecode. Platform-specific (different JVM per OS).
+- **JRE** — JVM + core libraries. Enough to RUN Java programs.
+- **JDK** — JRE + development tools (compiler, debugger, profiler). Needed to DEVELOP Java programs.
+
+> Note: Since Java 11, JRE is no longer distributed separately. Use `jlink` to create custom runtimes.
+
+**Q3: What is the difference between stack and heap memory?**
+
+| Aspect | Stack | Heap |
+|--------|-------|------|
+| Stored | Local variables, method frames, references | Objects, instance variables |
+| Scope | Per-thread (thread-safe) | Shared by all threads |
+| Lifetime | Destroyed when method returns | Garbage collected when unreachable |
+| Speed | Very fast (LIFO push/pop) | Slower (complex allocation) |
+| Size | Small (default ~1MB per thread) | Large (can be several GB) |
+| Error | `StackOverflowError` | `OutOfMemoryError` |
+| Management | Automatic (LIFO) | Garbage collector |
+
+---
+
+### Class Loading
+
+**Q4: What is the class loading mechanism in Java? Explain the delegation model.**
+
+When the JVM needs a class, it follows the **parent-first delegation model**:
+1. Application ClassLoader receives the request
+2. Delegates to Platform (Extension) ClassLoader
+3. Delegates to Bootstrap ClassLoader
+4. If Bootstrap can't find it → Platform tries → Application tries
+5. If no one finds it → `ClassNotFoundException`
+
+This prevents application code from replacing core Java classes (e.g., you can't create your own `java.lang.String`).
+
+**Q5: What are the three phases of class loading?**
+
+1. **Loading** — Find the `.class` file (from JAR, network, etc.) and read the bytecode into memory. A `Class<?>` object is created in the heap.
+2. **Linking:**
+   - **Verification** — Check bytecode for structural correctness, valid instructions, proper stack manipulation
+   - **Preparation** — Allocate memory for static fields and set default values (0, null, false)
+   - **Resolution** — Resolve symbolic references (class names, method names) to direct references
+3. **Initialization** — Execute static initializers (`static {}` blocks) and set static field values from assignments
+
+**Q6: Can two classes with the same name exist in the JVM?**
+
+Yes! Class identity is determined by **ClassLoader + Fully Qualified Name**. The same `.class` file loaded by two different classloaders produces two DIFFERENT types that cannot be cast to each other. This is used by:
+- Application servers (Tomcat, JBoss) for app isolation
+- OSGi for module isolation
+- Hot-reloading frameworks
+
+**Q7: What is a `ClassNotFoundException` vs `NoClassDefFoundError`?**
+
+| | `ClassNotFoundException` | `NoClassDefFoundError` |
+|---|---|---|
+| Type | Checked exception | Error (unchecked) |
+| When | Class not found during explicit loading (`Class.forName()`) | Class was available at compile-time but missing at runtime |
+| Cause | Wrong classpath, missing JAR | Removed JAR, failed static initializer |
+| Recovery | Possible (try-catch) | Usually fatal |
+
+---
+
+### Memory Model
+
+**Q8: Explain the Java Memory Model (JMM). What is the happens-before relationship?**
+
+The JMM defines how threads interact through memory and what behaviors are allowed. It addresses the fact that modern CPUs have caches and may reorder instructions.
+
+**Happens-before** guarantees that memory writes by one thread are visible to reads by another thread. Key happens-before rules:
+1. **Monitor lock:** Unlock happens-before subsequent lock on the same monitor
+2. **Volatile:** Write to volatile variable happens-before subsequent read of the same variable
+3. **Thread start:** `thread.start()` happens-before any action in the started thread
+4. **Thread join:** Actions in a thread happen-before `join()` returns
+5. **Final fields:** Writing a final field in a constructor happens-before the reference is read by another thread
+
+**Q9: What is Metaspace? How is it different from PermGen?**
+
+| Aspect | PermGen (Java ≤ 7) | Metaspace (Java 8+) |
+|--------|--------------------|--------------------|
+| Location | Heap (fixed size) | Native memory (off-heap) |
+| Default size | 64MB–256MB (fixed) | Unlimited (grows as needed) |
+| Error | `OutOfMemoryError: PermGen space` | `OutOfMemoryError: Metaspace` |
+| Tuning | `-XX:MaxPermSize` | `-XX:MaxMetaspaceSize` (optional limit) |
+| GC | Hard to tune, frequent cause of OOM | Automatic, rarely an issue |
+
+Metaspace stores class metadata, method bytecode, constant pools, and annotations. It grows automatically and is only collected when classloaders are garbage collected.
+
+**Q10: What causes `StackOverflowError`? How can you fix it?**
+
+Caused by too-deep recursion (the call stack exceeds its size limit). Each method call adds a frame to the stack. When the stack is full, the JVM throws `StackOverflowError`.
+
+Fixes:
+- Convert recursion to iteration
+- Use tail-call optimization (Java doesn't support this natively, but you can restructure manually)
+- Increase stack size with `-Xss` (e.g., `-Xss4m`) — use sparingly, as each thread gets this amount
+
+---
+
+### Garbage Collection
+
+**Q11: How does garbage collection work? What determines if an object is eligible for GC?**
+
+The GC uses **reachability analysis** starting from **GC roots**:
+- Local variables on the stack
+- Active threads
+- Static fields
+- JNI references
+
+Objects reachable from any GC root (directly or transitively) are ALIVE. Unreachable objects are GARBAGE and can be collected.
+
+> Note: Having a reference to an object does NOT prevent GC if the reference itself is unreachable. It's the chain from GC roots that matters.
+
+**Q12: What is the generational garbage collection model? Why does it work?**
+
+The **generational hypothesis** states that most objects die young. The heap is divided by age:
+
+1. **Young Generation (Eden + Survivors):**
+   - New objects go to Eden
+   - Minor GC: Copy survivors to Survivor space, increment age
+   - Fast and frequent (~milliseconds)
+2. **Old Generation (Tenured):**
+   - Objects surviving many Minor GCs get promoted here
+   - Major GC / Full GC: Less frequent but more expensive
+   - Can cause noticeable pauses
+
+This works because ~95% of objects become unreachable before the first Minor GC. By concentrating on the Young Generation, the GC avoids scanning the entire heap every time.
+
+**Q13: Compare G1, ZGC, and Shenandoah garbage collectors.**
+
+| Feature | G1GC | ZGC | Shenandoah |
+|---------|------|-----|-----------|
+| Default since | Java 9 | — | — |
+| Max pause target | 200ms (tunable) | <1ms | <10ms |
+| Concurrent | Partially | Fully | Fully |
+| Compaction | During pause | Concurrent | Concurrent |
+| Max heap | ~32GB practical | Multi-TB | Multi-TB |
+| Complexity | Medium | Low (fewer tuning knobs) | Low |
+| Use case | General purpose | Low-latency, large heaps | Low-latency |
+
+**Q14: What is the difference between Minor GC, Major GC, and Full GC?**
+
+- **Minor GC** — Collects only the Young Generation. Fast (~10ms). Triggered when Eden is full.
+- **Major GC** — Collects only the Old Generation. Slower. Triggered when Old Gen is filling up.
+- **Full GC** — Collects the ENTIRE heap (Young + Old + Metaspace). Most expensive. Triggered by `System.gc()`, Metaspace expansion, or when concurrent GC fails.
+
+> `System.gc()` is a *suggestion* to the JVM, not a command. The JVM may ignore it. Never rely on it in production.
+
+**Q15: What are weak, soft, and phantom references?**
+
+| Reference Type | GC Behavior | Use Case |
+|---------------|-------------|---------|
+| **Strong** (`Object o = new Obj()`) | Never collected while referenced | Normal references |
+| **Soft** (`SoftReference<T>`) | Collected only under memory pressure | Memory-sensitive caches |
+| **Weak** (`WeakReference<T>`) | Collected at next GC regardless of memory | WeakHashMap, canonicalization |
+| **Phantom** (`PhantomReference<T>`) | Enqueued after finalization | Resource cleanup, pre-mortem tracking |
+
+**Q16: What are common JVM tuning flags for production?**
+
+```bash
+# Heap sizing
+-Xms4g                        # Initial heap (set equal to -Xmx for production)
+-Xmx4g                        # Maximum heap
+
+# GC selection
+-XX:+UseG1GC                   # G1 (default Java 9+)
+-XX:+UseZGC                    # ZGC (for ultra-low latency)
+
+# G1 tuning
+-XX:MaxGCPauseMillis=200       # Target pause time
+-XX:G1HeapRegionSize=16m       # Region size (1-32MB, power of 2)
+
+# Metaspace
+-XX:MaxMetaspaceSize=256m      # Limit metaspace growth
+
+# Diagnostics
+-Xlog:gc*:file=gc.log:time     # GC logging (Java 9+ unified logging)
+-XX:+HeapDumpOnOutOfMemoryError # Auto heap dump on OOM
+-XX:HeapDumpPath=/path/dump.hprof
+
+# Performance
+-XX:+UseStringDeduplication    # Deduplicate strings in G1 (saves memory)
+-XX:+AlwaysPreTouch            # Touch all heap pages at startup (avoid lazy allocation)
+```
+
+---
+
+### JIT Compilation
+
+**Q17: What is JIT compilation? How does tiered compilation work?**
+
+JIT (Just-In-Time) compilation converts hot bytecode to native machine code at runtime, achieving near-native performance. Tiered compilation uses multiple levels:
+
+| Level | Compiler | Trigger | Optimizations |
+|-------|----------|---------|---------------|
+| 0 | Interpreter | All code initially | None (profiling data collected) |
+| 1-3 | C1 (Client) | ~1,500 invocations | Basic: inlining, constant folding |
+| 4 | C2 (Server) | ~10,000 invocations | Aggressive: escape analysis, loop unrolling, vectorization |
+
+The JVM can also **deoptimize** — if assumptions made during compilation are invalidated (e.g., a class is newly loaded that changes method dispatch), the JVM reverts to interpreted mode and recompiles.
+
+**Q18: What is escape analysis? How does it improve performance?**
+
+Escape analysis determines whether an object created inside a method "escapes" to the outside world (returned, stored in a field, passed to another thread). If it does NOT escape:
+
+1. **Stack allocation** — Object allocated on the stack instead of heap (no GC needed)
+2. **Scalar replacement** — Object eliminated entirely; its fields become local variables
+3. **Lock elision** — Synchronization on the non-escaping object is removed
+
+This is why creating short-lived objects in Java is often "free" — the JIT compiler eliminates them entirely.
+
+**Q19: What is On-Stack Replacement (OSR)?**
+
+OSR allows the JVM to switch from interpreted to compiled code **mid-execution** — even inside a running loop. Without OSR, a long-running loop would remain in interpreted mode until the method is called again.
+
+---
+
+### Bytecode
+
+**Q20: What is bytecode and why is it important?**
+
+Bytecode is the platform-independent instruction set that the JVM executes. Each `.class` file contains bytecode — an intermediate representation between source code and machine code.
+
+Why it matters:
+- **Platform independence** — Same bytecode runs on any JVM (Windows, Linux, macOS)
+- **Security** — Bytecode is verified before execution (type safety, stack bounds)
+- **Performance** — JIT compiles hot paths to native code
+- **Language interoperability** — Kotlin, Scala, Groovy all compile to JVM bytecode
+
+**Q21: What are the key bytecode instructions for method invocation?**
+
+| Instruction | Used For |
+|------------|---------|
+| `invokevirtual` | Regular instance method calls (with virtual dispatch) |
+| `invokeinterface` | Methods called through an interface reference |
+| `invokespecial` | Constructors, private methods, super calls (no virtual dispatch) |
+| `invokestatic` | Static method calls |
+| `invokedynamic` | Lambda expressions, string concatenation (Java 9+), dynamic language support |
+
+`invokedynamic` is particularly important — it's how lambdas achieve better performance than anonymous inner classes.
+
+---
+
+## Practice Problems
+
+### Easy
+1. **ClassLoader Identification:** Write a program that prints the classloader for `String.class`, `java.sql.Connection.class`, and your own class. Explain why each uses a different classloader.
+2. **Memory Areas Demo:** Create objects of varying sizes and observe Eden/Survivor/Old Gen usage via GC logs (`-Xlog:gc*`).
+3. **GC Algorithm Selection:** Run the same memory-intensive program with Serial, Parallel, G1, and ZGC. Compare pause times and throughput.
+
+### Medium
+4. **Custom ClassLoader:** Implement a classloader that loads `.class` files from a custom directory (not on the classpath). Demonstrate loading and instantiating the class.
+5. **Memory Leak Simulation:** Intentionally create a memory leak using a static collection, detect it with heap dumps, and fix it.
+6. **GC Tuning Challenge:** Given a program that allocates/deallocates objects in bursts, tune GC parameters (`-Xmx`, `-XX:MaxGCPauseMillis`, region sizes) to minimize pause times.
+7. **String Pool Investigation:** Demonstrate the string pool's behavior with `String.intern()`, `.equals()` vs `==`, and memory implications.
+
+### Hard
+8. **Bytecode Analysis:** Write a simple method, compile it, and analyze the bytecode using `javap -c`. Predict what bytecode instructions a given Java snippet produces.
+9. **JIT Compilation Observation:** Use `-XX:+PrintCompilation` to observe which methods get compiled, at what tier, and how performance changes during warm-up.
+10. **Escape Analysis Verification:** Write code where objects do and don't escape, and verify using GC logs that non-escaping objects are stack-allocated (no GC pressure).
+
+### Challenge
+11. **Production GC Analysis:** Analyze a GC log file to determine: average pause time, frequency of Minor vs Major GC, memory allocation rate, and promotion rate. Recommend tuning changes.
+12. **ClassLoader Isolation:** Build a plugin system where each plugin is loaded by its own classloader, enabling independent version upgrades and isolation.
+
+---
+
+## Quick Reference: Essential JVM Flags
+
+```
+Category          Flag                              Purpose
+─────────         ────                              ───────
+Heap              -Xms / -Xmx                       Min/max heap size
+Stack             -Xss                               Thread stack size
+GC                -XX:+UseG1GC/UseZGC/UseShenandoahGC  GC algorithm
+GC Tuning         -XX:MaxGCPauseMillis               Target pause (G1)
+GC Tuning         -XX:NewRatio                        Young:Old ratio
+Metaspace         -XX:MaxMetaspaceSize                Metaspace limit
+Logging           -Xlog:gc*                          GC logging
+Diagnostics       -XX:+HeapDumpOnOutOfMemoryError    Auto heap dump
+JIT               -XX:+PrintCompilation              JIT compilation log
+JIT               -XX:CompileThreshold               Invocations before compile
+Debug             -XX:+ShowCodeDetailsInExceptionMessages  Helpful NPE messages
+```

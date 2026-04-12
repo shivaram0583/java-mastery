@@ -295,3 +295,241 @@ The key principle is that **the lifetime of concurrent tasks does not extend bey
 | Sequenced Collections | `SequencedCollectionsDemo.java` | `SequencedCollectionsTest.java` |
 | Structured Concurrency | `StructuredConcurrencyDemo.java` | — |
 | Unnamed Variables | `UnnamedVariablesDemo.java` | `UnnamedVariablesTest.java` |
+| Practice Problems | `Java18To24PracticeProblems.java` | `Java18To24PracticeTest.java` |
+
+---
+
+## Interview Questions
+
+### Virtual Threads
+
+**Q1: What are virtual threads and how do they differ from platform threads?**
+
+| Aspect | Platform Threads | Virtual Threads |
+|--------|-----------------|----------------|
+| Managed by | Operating System | JVM |
+| Memory per thread | ~1MB stack | ~Few KB (grows as needed) |
+| Max practical count | ~5,000–10,000 | Millions |
+| Creation cost | Expensive (OS call) | Cheap (Java object) |
+| Best for | CPU-bound tasks | I/O-bound tasks |
+| Scheduling | OS scheduler | JVM scheduler (mounted on carrier threads) |
+
+Virtual threads are lightweight threads that decouple the Java thread from the OS thread. When a virtual thread blocks on I/O, the JVM unmounts it from the carrier thread, allowing that carrier to run another virtual thread. This enables the "thread-per-request" model at scale.
+
+**Q2: What is thread pinning? When does it happen with virtual threads?**
+
+Thread pinning occurs when a virtual thread cannot be unmounted from its carrier thread, effectively tying up an OS thread. This happens in two scenarios:
+
+1. **Inside a `synchronized` block/method** — The JVM cannot unmount because `synchronized` is tied to the OS thread's monitor. **Fix:** Use `ReentrantLock` instead.
+2. **During a native method call (JNI)** — Native code runs on the OS thread and cannot be suspended.
+
+Pinning reduces the benefit of virtual threads because a pinned virtual thread blocks its carrier, limiting concurrency.
+
+```
+  Normal (unmounting):                 Pinned (stuck):
+  VThread blocks on I/O               VThread enters synchronized
+  → JVM unmounts VThread               → Cannot unmount
+  → Carrier picks up VThread2          → Carrier thread blocked
+  → VThread resumed when I/O done     → Other VThreads must wait
+```
+
+**Q3: Should you pool virtual threads? Why or why not?**
+
+**No.** Thread pooling was invented to amortize the cost of creating expensive OS threads. Virtual threads are cheap to create (~few microseconds, few KB). Pooling them would:
+- Add unnecessary complexity
+- Limit concurrency (the pool size becomes a bottleneck)
+- Defeat the purpose of having millions of lightweight threads
+
+Use `Executors.newVirtualThreadPerTaskExecutor()` which creates a new virtual thread for each task.
+
+**Q4: What is `Executors.newVirtualThreadPerTaskExecutor()`?**
+
+An executor that creates a new virtual thread for each submitted task. Unlike `newFixedThreadPool(n)`, there is no limit on concurrent threads. The executor is autocloseable — when closed, it waits for all submitted tasks to complete.
+
+```java
+try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+    IntStream.range(0, 100_000).forEach(i ->
+        executor.submit(() -> {
+            Thread.sleep(Duration.ofSeconds(1));
+            return i;
+        })
+    );
+}  // waits for all 100,000 tasks
+```
+
+**Q5: Can virtual threads be used with existing code?**
+
+Yes, virtual threads are `Thread` objects — they work with all existing `Thread` APIs, `ExecutorService`, `synchronized` (with pinning caveat), `ThreadLocal` (with memory caveat), and `ReentrantLock`. This is a key design goal: migrate existing thread-per-request code to virtual threads with minimal changes.
+
+**Q6: What are Scoped Values and why are they better than ThreadLocal for virtual threads?**
+
+| Aspect | ThreadLocal | ScopedValue |
+|--------|------------|-------------|
+| Mutability | Mutable (set/get anytime) | Immutable once bound |
+| Lifecycle | No clear end (must manually remove) | Automatically removed when scope ends |
+| Memory | Per-thread storage (expensive with millions of VThreads) | Shared, inherited efficiently |
+| Thread safety | Mutable → potential races | Immutable → inherently safe |
+| Inheritance | InheritableThreadLocal (copies per child) | Efficiently inherited by child VThreads |
+
+---
+
+### Record Patterns
+
+**Q7: What are record patterns? How do they differ from type patterns?**
+
+- **Type pattern:** `case String s` — matches a type and binds the whole object
+- **Record pattern:** `case Point(int x, int y)` — matches a record type AND destructures its components
+
+Record patterns eliminate the need to call accessor methods after matching:
+```java
+// Type pattern (two steps):
+if (obj instanceof Point p) { int x = p.x(); int y = p.y(); }
+
+// Record pattern (one step):
+if (obj instanceof Point(int x, int y)) { /* x and y directly available */ }
+```
+
+**Q8: Can record patterns be nested?**
+
+Yes. Nested record patterns allow deep destructuring in a single pattern:
+```java
+record Point(int x, int y) {}
+record Line(Point start, Point end) {}
+
+if (obj instanceof Line(Point(var x1, var y1), Point(var x2, var y2))) {
+    double length = Math.sqrt(Math.pow(x2-x1, 2) + Math.pow(y2-y1, 2));
+}
+```
+
+---
+
+### Pattern Matching for Switch
+
+**Q9: What are guarded patterns (the `when` clause)?**
+
+Guarded patterns add a boolean condition to a pattern using `when`:
+```java
+case String s when s.length() > 10 -> "long string"
+case String s -> "short string"
+```
+Order matters: more specific guarded patterns must come before more general ones. The `when` clause is evaluated only if the pattern matches.
+
+**Q10: How does null handling work in pattern matching switch?**
+
+Before Java 21, passing `null` to a switch always threw `NullPointerException`. Now you can explicitly handle null:
+```java
+switch (obj) {
+    case null -> "it's null";
+    case String s -> "it's a string";
+    default -> "something else";
+}
+```
+If you don't include a `case null`, the old behavior (NPE) is preserved for backward compatibility.
+
+**Q11: How do sealed classes interact with pattern matching switch for exhaustiveness?**
+
+When switching over a sealed type, the compiler knows all permitted subtypes. If your switch cases cover all subtypes, no `default` is needed. If you later add a new subtype to the sealed hierarchy, the compiler forces you to handle it everywhere — catching potential bugs at compile time.
+
+---
+
+### Sequenced Collections
+
+**Q12: What problem do Sequenced Collections solve?**
+
+Before Java 21, there was no common interface for collections with a defined encounter order. Getting the first/last element required type-specific code:
+- `List`: `list.get(0)` / `list.get(list.size()-1)`
+- `Deque`: `deque.getFirst()` / `deque.getLast()`
+- `SortedSet`: `set.first()` / `set.last()`
+
+`SequencedCollection` provides `getFirst()`, `getLast()`, `addFirst()`, `addLast()`, `removeFirst()`, `removeLast()`, and `reversed()` across all ordered collections.
+
+**Q13: What is the `reversed()` method and does it create a copy?**
+
+`reversed()` returns a **reversed view** of the collection — NOT a copy. Changes to the original collection are reflected in the reversed view and vice versa. It's O(1) because it just wraps the original collection with reversed indexing.
+
+---
+
+### Structured Concurrency
+
+**Q14: What is structured concurrency and what problem does it solve?**
+
+Structured concurrency ensures that the lifetime of concurrent tasks does not extend beyond the scope that created them. Problems it solves:
+- **Resource leaks:** Threads continuing to run after the parent scope exits
+- **Orphaned tasks:** If task A fails, task B continues running wastefully
+- **Error propagation:** Difficult to propagate exceptions from subtasks to the parent
+
+With structured concurrency, all subtasks must complete (or be cancelled) before the scope closes — like how local variables can't escape their enclosing block.
+
+**Q15: What are the shutdown policies in StructuredTaskScope?**
+
+- **`ShutdownOnFailure`** — If any subtask fails, cancel all remaining subtasks. Useful when all subtasks must succeed (e.g., fetch user AND order data).
+- **`ShutdownOnSuccess`** — If any subtask succeeds, cancel remaining subtasks. Useful for racing (e.g., query primary AND replica database, take whichever responds first).
+
+**Q16: How does structured concurrency differ from CompletableFuture?**
+
+| Aspect | CompletableFuture | Structured Concurrency |
+|--------|-------------------|----------------------|
+| Task lifetime | Unscoped — can outlive creator | Bounded — must complete within scope |
+| Cancellation | Manual (must track and cancel each) | Automatic (scope cancels all on failure) |
+| Error handling | Chain-based (exceptionally, handle) | Scope-based (throwIfFailed) |
+| Thread dump visibility | Tasks not linked to parent | Clear parent-child relationship |
+| Style | Reactive/callback | Imperative/synchronous-looking |
+
+---
+
+### Unnamed Variables
+
+**Q17: What are unnamed variables and when should you use them?**
+
+Unnamed variables (`_`) explicitly signal that a value is intentionally unused. Use them for:
+- Unused loop variables: `for (var _ : collection) { count++; }`
+- Unused catch parameters: `catch (Exception _) { logGenericError(); }`
+- Unused pattern components: `case Point(var x, _) -> processX(x);`
+- Unused lambda parameters: `map.forEach((_, value) -> process(value));`
+
+They improve readability by making the developer's intent clear and eliminate IDE warnings about unused variables.
+
+---
+
+## Practice Problems
+
+### Easy
+1. **Virtual Thread Creation:** Create a virtual thread using three different approaches: `Thread.ofVirtual().start()`, `Thread.startVirtualThread()`, and `Executors.newVirtualThreadPerTaskExecutor()`.
+2. **Sequenced Collections:** Create a `LinkedHashMap`, add elements, then use `getFirst()`, `getLast()`, and iterate using `reversed()`.
+3. **Unnamed Variables:** Refactor code with unused variables to use `_` where appropriate.
+
+### Medium
+4. **Virtual Thread HTTP Server:** Simulate a simple HTTP server that handles each "request" on a virtual thread. Demonstrate handling >10,000 concurrent requests.
+5. **Record Pattern Destructuring:** Create nested records representing a company structure (Company → Department → Employee) and use nested record patterns to extract data.
+6. **Pattern Matching Switch Calculator:** Build a calculator that accepts different expression types (sealed hierarchy) and evaluates them using pattern matching switch with guarded patterns.
+7. **Sequenced Collections Utilities:** Write utility methods that work with `SequencedCollection` to rotate elements, swap first/last, and find the middle element.
+
+### Hard
+8. **Virtual Thread Performance Comparison:** Write a benchmark comparing virtual threads vs platform threads for:
+   - I/O-bound tasks (simulated with Thread.sleep)
+   - CPU-bound tasks (prime number calculation)
+   - Show when each is better
+9. **Structured Concurrency Patterns:** Implement a service that uses structured concurrency to:
+   - Fetch data from 3 sources concurrently
+   - Retry failed sources up to 3 times
+   - Timeout the entire operation after 5 seconds
+   - Use ShutdownOnFailure and ShutdownOnSuccess for different use cases
+10. **Pattern Matching State Machine:** Model a state machine using sealed interfaces and pattern matching, where transitions are validated at compile time.
+
+### Challenge
+11. **Web Scraper with Virtual Threads:** Build a concurrent web scraper that processes URLs using virtual threads, with structured concurrency for error handling and a bounded semaphore for rate limiting.
+12. **Event Sourcing with Sealed Types:** Model a complete event-sourcing system using sealed interfaces for events, record patterns for handlers, and structured concurrency for projections.
+
+---
+
+## Common Mistakes Cheat Sheet
+
+| Mistake | Problem | Fix |
+|---------|---------|-----|
+| Pooling virtual threads | Limits concurrency, adds overhead | Use `newVirtualThreadPerTaskExecutor()` |
+| `synchronized` with virtual threads | Pins virtual thread to carrier | Use `ReentrantLock` |
+| `ThreadLocal` with virtual threads | Huge memory with millions of VThreads | Use `ScopedValue` |
+| Virtual threads for CPU-bound work | No benefit; overhead may hurt | Use platform threads for CPU work |
+| Missing `case null` in pattern switch | NPE when null passed | Add explicit `case null` handling |
+| Non-exhaustive sealed switch | Compile error when new subtype added | Handle all subtypes or use `default` |
+| Mutating `reversed()` view unexpectedly | Changes affect original collection | Document that `reversed()` is a view |

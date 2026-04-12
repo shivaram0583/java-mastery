@@ -309,6 +309,150 @@ See **Module 03 — Java 18 to 24 Features** for full virtual thread coverage. T
 
 ---
 
+---
+
+## Interview Questions
+
+**Q1: What is the difference between `Thread.start()` and `Thread.run()`?**
+`start()` creates a new OS thread and invokes `run()` in that new thread. Calling `run()` directly executes the method on the **current** thread — no new thread is created. This is a common bug that results in sequential execution instead of concurrency.
+
+**Q2: Explain the difference between `Runnable` and `Callable`.**
+`Runnable.run()` returns `void` and cannot throw checked exceptions. `Callable.call()` returns a value of type `V` and can throw checked exceptions. `Callable` is used with `ExecutorService.submit()`, which returns a `Future<V>` to retrieve the result.
+
+**Q3: What is a race condition? Give an example.**
+A race condition occurs when the correctness of a program depends on the relative timing of threads. Example: two threads incrementing a shared counter simultaneously — both read value 5, both write value 6, resulting in a lost update (expected 7, got 6).
+
+**Q4: How does `synchronized` work internally in Java?**
+Every Java object has an associated **monitor** (intrinsic lock). When a thread enters a `synchronized` block, it acquires the monitor; when it exits, it releases it. Other threads trying to enter a `synchronized` block on the same object are put in the BLOCKED state. The JVM uses a **monitor enter/exit** bytecode instruction pair. Modern JVMs optimize locks with biased locking (deprecated in Java 15), thin locks, and fat locks depending on contention.
+
+**Q5: What is the difference between `synchronized` and `ReentrantLock`?**
+| Feature | `synchronized` | `ReentrantLock` |
+|---|---|---|
+| Lock acquisition | Implicit (enter block) | Explicit (`lock()`) |
+| Release | Automatic (exit block) | Manual (`unlock()` in `finally`) |
+| `tryLock()` with timeout | No | Yes |
+| Interruptible waiting | No | Yes (`lockInterruptibly()`) |
+| Fairness option | No | Yes (FIFO ordering) |
+| Multiple conditions | No (only one wait set) | Yes (`newCondition()`) |
+
+**Q6: What is the `volatile` keyword and when should you use it?**
+`volatile` guarantees **visibility** — writes to a volatile variable are immediately visible to all threads. It also prevents **instruction reordering** across the volatile access. Use it for simple flags (e.g., a `boolean` stop signal) where atomicity is not needed. Do NOT use it for compound operations like `count++` (use `AtomicInteger` instead).
+
+**Q7: Explain happens-before relationship in Java Memory Model.**
+The JMM defines a partial ordering of actions called happens-before. If action A happens-before action B, then the effects of A are guaranteed to be visible to B. Key rules: (1) Within a thread, each statement happens-before the next. (2) Unlocking a monitor happens-before subsequent locking of that monitor. (3) A volatile write happens-before subsequent volatile reads of that variable. (4) `Thread.start()` happens-before any action in the started thread. (5) All actions in a thread happen-before any thread that successfully `join()`s that thread.
+
+**Q8: What is a deadlock? How do you prevent it?**
+Deadlock occurs when two or more threads are permanently blocked, each waiting to acquire a lock held by the other. Four necessary conditions (Coffman conditions): (1) Mutual exclusion, (2) Hold and wait, (3) No preemption, (4) Circular wait. Prevention strategies: acquire locks in a consistent global order (breaks circular wait), use `tryLock()` with timeouts, avoid nested locks when possible, use lock-free algorithms.
+
+**Q9: What is the difference between `wait()` and `sleep()`?**
+| Aspect | `wait()` | `sleep()` |
+|---|---|---|
+| Belongs to | `Object` | `Thread` |
+| Releases lock | Yes | No |
+| Must be in `synchronized` | Yes | No |
+| Wakes up by | `notify()`/`notifyAll()`/timeout | Timeout only |
+| Purpose | Inter-thread communication | Pausing execution |
+
+**Q10: What is the `ThreadLocal` class? What problem does it solve?**
+`ThreadLocal` provides per-thread isolated storage. Each thread accessing a `ThreadLocal` variable gets its own independent copy, eliminating the need for synchronization. Common uses: storing user context in web apps, storing non-thread-safe objects like `SimpleDateFormat`. **Pitfall**: In thread pools, you must call `remove()` after use to prevent data/memory leaks.
+
+**Q11: Explain the Executor framework. Why prefer it over manually creating threads?**
+The Executor framework decouples task submission from execution mechanics. Benefits: (1) Thread reuse — creating OS threads is expensive (~1MB stack each); (2) Bounded thread pools prevent resource exhaustion; (3) Built-in task queuing; (4) Configurable rejection policies; (5) Scheduled execution support. Key implementations: `FixedThreadPool` (fixed workers), `CachedThreadPool` (unbounded, reuses idle threads), `ScheduledThreadPool` (delayed/periodic tasks), `ForkJoinPool` (work-stealing for recursive algorithms).
+
+**Q12: What is the difference between `ConcurrentHashMap` and `Collections.synchronizedMap()`?**
+`synchronizedMap` wraps every operation in a single lock on the entire map — only one thread can access the map at a time. `ConcurrentHashMap` uses **lock striping** (Java 7: segment locks; Java 8+: CAS + synchronized on individual bins), allowing multiple threads to read/write concurrently to different buckets. `ConcurrentHashMap` also provides atomic compound operations like `putIfAbsent()`, `computeIfAbsent()`, and `merge()`.
+
+**Q13: Explain CAS (Compare-And-Swap). How do `AtomicInteger` and `LongAdder` use it?**
+CAS is a hardware-level atomic instruction: `CAS(address, expected, new)` — if the value at `address` equals `expected`, set it to `new` and return true; otherwise return false. `AtomicInteger` uses CAS for operations like `incrementAndGet()` — it reads the current value, computes the new value, and attempts CAS in a retry loop. `LongAdder` reduces contention by maintaining multiple internal cells — each thread updates a different cell, and `sum()` adds them all up. `LongAdder` is better under high contention; `AtomicLong` is better for low contention and when you need an exact point-in-time value.
+
+**Q14: What is the difference between `CountDownLatch` and `CyclicBarrier`?**
+| Aspect | `CountDownLatch` | `CyclicBarrier` |
+|---|---|---|
+| Reusable | No (one-time use) | Yes (resets automatically) |
+| Who waits | One or more threads call `await()` | All parties call `await()` |
+| Who counts | Other threads call `countDown()` | The `await()` call itself |
+| Optional action | None | Barrier action runs when all parties arrive |
+
+**Q15: What is `ForkJoinPool` and how does work-stealing work?**
+`ForkJoinPool` is designed for recursive divide-and-conquer parallelism. Each thread has a double-ended queue (deque). When a thread runs out of tasks, it steals tasks from the tail of another thread's deque (work-stealing). This keeps all threads busy without centralized coordination. Used by parallel streams and `CompletableFuture.supplyAsync()` by default.
+
+**Q16: What is a `Semaphore`? How does it differ from a lock?**
+A `Semaphore` controls access to N permits (not just 1 like a lock). `acquire()` blocks until a permit is available; `release()` returns a permit. A `Semaphore(1)` behaves like a mutex. Common use: limiting the number of concurrent connections to a database or API. Unlike locks, semaphores do not have an owner — any thread can release a permit, even one that didn't acquire it.
+
+**Q17: What is `ReadWriteLock`? When is it useful?**
+`ReadWriteLock` separates read and write locks. Multiple threads can hold the read lock simultaneously (since reads don't conflict), but the write lock is exclusive. This improves throughput for read-heavy workloads (e.g., caches). However, if writes are frequent, the overhead of managing two locks can outweigh the benefit.
+
+**Q18: What is `StampedLock` and how does optimistic locking work?**
+`StampedLock` adds an optimistic read mode to `ReadWriteLock`. In optimistic mode, you don't acquire a lock at all — you get a stamp, read the data, then validate the stamp. If no write occurred during your read, you're done (zero overhead). If a write did occur, you fall back to a pessimistic read lock. This is the fastest approach for read-dominated workloads.
+
+**Q19: How do you detect and avoid thread starvation?**
+Starvation occurs when a thread never gets CPU time or never acquires a needed lock. Detection: thread dumps showing a thread perpetually in BLOCKED/WAITING state. Prevention: use fair locks (`new ReentrantLock(true)`), avoid unbounded priority differences, use `ForkJoinPool` with work-stealing, set reasonable timeouts.
+
+**Q20: What is the difference between livelock and deadlock?**
+In a **deadlock**, threads are blocked and make no progress. In a **livelock**, threads are actively running but keep responding to each other's state changes without progressing (e.g., two threads repeatedly acquiring and releasing locks in a cycle). Livelock is harder to detect because threads appear active. Solution: add random back-off delays.
+
+**Q21: What are daemon threads?**
+Daemon threads are background service threads (e.g., GC thread). When all non-daemon threads finish, the JVM exits — it does not wait for daemon threads. Call `thread.setDaemon(true)` before `start()`. Use for background tasks that should not prevent application shutdown.
+
+**Q22: Explain `Thread.interrupt()`. How does interruption work?**
+`interrupt()` sets a thread's interrupt flag. If the thread is blocked in `sleep()`, `wait()`, or `join()`, it throws `InterruptedException` and clears the flag. If the thread is running, it must periodically check `Thread.interrupted()` or `isInterrupted()`. Best practice: when catching `InterruptedException`, either re-throw it or restore the interrupt flag with `Thread.currentThread().interrupt()`.
+
+**Q23: What is the Producer-Consumer pattern? How do you implement it in Java?**
+Producers generate data and put it into a shared buffer; consumers take data from the buffer and process it. Java's `BlockingQueue` is the ideal implementation: `put()` blocks when the queue is full (backpressure), and `take()` blocks when the queue is empty. `ArrayBlockingQueue` provides bounded capacity; `LinkedBlockingQueue` can be unbounded or bounded.
+
+**Q24: What is `CopyOnWriteArrayList` and when should you use it?**
+`CopyOnWriteArrayList` creates a full copy of the internal array on every write (add/set/remove). Reads are completely lock-free, making it ideal for scenarios with many reads and very few writes (e.g., event listener lists, configuration lists). Writes are expensive due to copying.
+
+**Q25: How does `Phaser` differ from `CyclicBarrier`?**
+`Phaser` is more flexible: it supports dynamic registration/deregistration of parties (threads can join or leave), multiple phases with phase numbers, and conditional termination. `CyclicBarrier` has a fixed number of parties and only supports one barrier that resets. Use `Phaser` for complex multi-phase parallel algorithms.
+
+---
+
+## Practice Problems
+
+### Easy
+1. **Thread Interleaving:** Create two threads that print numbers 1-10 and letters A-J respectively. Run them and observe the interleaving. Then use `join()` to make one wait for the other.
+2. **Shared Counter:** Create a shared counter incremented by 10 threads (1000 increments each). Show the bug without synchronization, then fix it using: (a) `synchronized`, (b) `AtomicInteger`, (c) `ReentrantLock`.
+3. **Daemon Thread:** Create a daemon thread that prints "tick" every second. Start it, sleep the main thread for 5 seconds, then exit. Observe that the daemon thread stops automatically.
+4. **ThreadLocal Basics:** Create a `ThreadLocal<Integer>` and assign different values in 3 threads. Print the value from each thread to confirm isolation.
+
+### Medium
+5. **Producer-Consumer:** Implement a producer-consumer system using `ArrayBlockingQueue`. The producer generates random numbers; the consumer calculates running averages. Use a poison pill to signal shutdown.
+6. **Read-Write Cache:** Build a simple cache using `ReadWriteLock`. Multiple reader threads query the cache concurrently; a single writer thread updates values periodically. Measure throughput.
+7. **Dining Philosophers:** Implement the dining philosophers problem. First create a version that deadlocks, then fix it by ordering lock acquisition.
+8. **CountDownLatch Service Startup:** Simulate a service that depends on 3 subsystems. Use `CountDownLatch` to block the main service until all subsystems report ready.
+9. **Parallel Sum with ForkJoinPool:** Compute the sum of a large array using `RecursiveTask`. Split the array until chunks are small enough, then sum directly.
+10. **Thread-Safe Singleton:** Implement a singleton using: (a) double-checked locking with `volatile`, (b) `enum`, (c) holder class pattern. Compare trade-offs.
+
+### Hard
+11. **Custom Thread Pool:** Implement a simplified thread pool with a `BlockingQueue<Runnable>` and N worker threads. Support `submit(Runnable)` and `shutdown()`.
+12. **Rate Limiter:** Implement a simple rate limiter using `Semaphore` that allows at most N requests per second. Test with concurrent threads.
+13. **CyclicBarrier Matrix Computation:** Divide a matrix into row partitions. Each thread processes its partition, then all threads synchronize at a `CyclicBarrier` before the next phase.
+14. **StampedLock Point:** Implement a thread-safe 2D Point class using `StampedLock` with optimistic reads for `distanceFromOrigin()` and write locks for `move()`.
+
+### Challenge
+15. **Non-blocking Stack:** Implement a lock-free stack using `AtomicReference` and CAS. Handle the ABA problem using `AtomicStampedReference`.
+16. **Deadlock Detector:** Write a program that creates a deliberate deadlock, then uses `ThreadMXBean.findDeadlockedThreads()` to detect and report it.
+
+---
+
+## Common Mistakes Cheat Sheet
+
+| Mistake | Why It's Wrong | Fix |
+|---|---|---|
+| Calling `run()` instead of `start()` | Executes on current thread, no concurrency | Call `start()` to create a new thread |
+| `volatile` for `count++` | `count++` is not atomic (read-modify-write) | Use `AtomicInteger.incrementAndGet()` |
+| Not unlocking `ReentrantLock` | Other threads wait forever | Always `unlock()` in `finally` block |
+| `synchronizedMap` + iterating without explicit lock | `ConcurrentModificationException` | Use `ConcurrentHashMap` or sync on the map during iteration |
+| Swallowing `InterruptedException` | Interrupt flag is cleared, caller never knows | Re-throw or call `Thread.currentThread().interrupt()` |
+| Forgetting `ThreadLocal.remove()` in thread pool | Data leaks between requests, memory leaks | Always `remove()` in `finally` |
+| Using `notify()` instead of `notifyAll()` | May wake a thread that can't proceed | Prefer `notifyAll()` (or use `Condition`) |
+| Busy-wait loop (`while (!flag) {}`) | Burns CPU cycles doing nothing | Use `wait()`/`notify()` or `BlockingQueue` |
+| `Thread.stop()` / `Thread.suspend()` | Deprecated — can leave objects in inconsistent state | Use interruption flag pattern |
+| Creating unlimited threads | OOM from ~1MB stack per thread | Use bounded thread pools |
+
+---
+
 ## File Overview
 
 | Topic | Demo Class | Test Class |
@@ -323,3 +467,5 @@ See **Module 03 — Java 18 to 24 Features** for full virtual thread coverage. T
 | Synchronizers | `SynchronizersDemo.java` | `SynchronizersTest.java` |
 | ThreadLocal | `ThreadLocalDemo.java` | — |
 | Deadlock | `DeadlockDemo.java` | `DeadlockTest.java` |
+| Producer-Consumer | `ProducerConsumerDemo.java` | `ProducerConsumerTest.java` |
+| Practice Problems | `ThreadingPracticeProblems.java` | `ThreadingPracticeTest.java` |

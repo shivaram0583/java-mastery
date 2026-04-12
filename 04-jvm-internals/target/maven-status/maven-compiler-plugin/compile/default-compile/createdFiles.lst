@@ -1,0 +1,10 @@
+com\javamastery\jvm\JitDemo.class
+com\javamastery\jvm\MemoryAreasDemo.class
+com\javamastery\jvm\BytecodeDemo.class
+com\javamastery\jvm\ClassLoaderDemo.class
+com\javamastery\jvm\JvmPracticeProblems.class
+com\javamastery\jvm\MemoryTuningDemo.class
+com\javamastery\jvm\GarbageCollectionDemo.class
+com\javamastery\jvm\ClassLoaderDemo$CustomClassLoader.class
+com\javamastery\jvm\JitDemo$1Point.class
+com\javamastery\jvm\MemoryTuningDemo$FinalizableResource.class

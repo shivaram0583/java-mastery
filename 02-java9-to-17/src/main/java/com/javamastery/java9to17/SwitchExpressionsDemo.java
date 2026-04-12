@@ -74,12 +74,12 @@ public class SwitchExpressionsDemo {
     }
 
     static void printType(Object obj) {
-        String description = switch (obj) {
-            case Integer i -> "Integer: " + i;
-            case String s  -> "String: '" + s + "' (length " + s.length() + ")";
-            case Double d  -> "Double: " + d;
-            default        -> "Other: " + obj.getClass().getSimpleName();
-        };
+        // Pattern matching instanceof (Java 16+) instead of pattern switch (Java 21+)
+        String description;
+        if (obj instanceof Integer i)      description = "Integer: " + i;
+        else if (obj instanceof String s)  description = "String: '" + s + "' (length " + s.length() + ")";
+        else if (obj instanceof Double d)  description = "Double: " + d;
+        else                               description = "Other: " + obj.getClass().getSimpleName();
         System.out.println(description);
     }
 }

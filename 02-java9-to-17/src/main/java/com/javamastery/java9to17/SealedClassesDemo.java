@@ -24,7 +24,7 @@ public class SealedClassesDemo {
     record Negate(Expression operand) implements Expression {}
 
     // --- 2. Sealed class hierarchy with different modifiers ---
-    sealed abstract class Vehicle permits Car, Truck, Bicycle {}
+    static sealed abstract class Vehicle permits Car, Truck, Bicycle {}
 
     static final class Car extends Vehicle {
         private final int seats;
@@ -80,13 +80,12 @@ public class SealedClassesDemo {
 
     /** Evaluates an expression tree. Sealed types enable exhaustive matching. */
     static double evaluate(Expression expr) {
-        return switch (expr) {
-            case Literal l   -> l.value();
-            case Add a       -> evaluate(a.left()) + evaluate(a.right());
-            case Multiply m  -> evaluate(m.left()) * evaluate(m.right());
-            case Negate n    -> -evaluate(n.operand());
-            // No default needed — compiler knows all subtypes
-        };
+        // Pattern matching instanceof (Java 16+) instead of pattern switch (Java 21+)
+        if (expr instanceof Literal l)   return l.value();
+        if (expr instanceof Add a)       return evaluate(a.left()) + evaluate(a.right());
+        if (expr instanceof Multiply m)  return evaluate(m.left()) * evaluate(m.right());
+        if (expr instanceof Negate n)    return -evaluate(n.operand());
+        throw new IllegalArgumentException("Unknown expression type: " + expr.getClass());
     }
 
     static String describeVehicle(Vehicle v) {

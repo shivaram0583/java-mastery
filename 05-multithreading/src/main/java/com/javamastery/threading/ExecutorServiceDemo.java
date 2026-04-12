@@ -13,20 +13,25 @@ public class ExecutorServiceDemo {
 
         // --- 1. Fixed thread pool ---
         System.out.println("--- Fixed Thread Pool (4 threads) ---");
-        try (ExecutorService executor = Executors.newFixedThreadPool(4)) {
+        ExecutorService fixedPool = Executors.newFixedThreadPool(4);
+        try {
             for (int i = 0; i < 8; i++) {
                 final int taskId = i;
-                executor.submit(() -> {
+                fixedPool.submit(() -> {
                     System.out.printf("  Task %d on %s%n", taskId, Thread.currentThread().getName());
                     Thread.sleep(100);
                     return taskId;
                 });
             }
+        } finally {
+            fixedPool.shutdown();
+            fixedPool.awaitTermination(5, TimeUnit.SECONDS);
         }
 
         // --- 2. Callable + Future (return values) ---
         System.out.println("\n--- Callable + Future ---");
-        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
             Future<Integer> future = executor.submit(() -> {
                 Thread.sleep(200);
                 return 42;
@@ -50,17 +55,24 @@ public class ExecutorServiceDemo {
             // invokeAny — returns the first completed result
             String fastest = executor.invokeAny(tasks);
             System.out.println("  invokeAny (fastest): " + fastest);
+        } finally {
+            executor.shutdown();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
         }
 
         // --- 3. Scheduled executor ---
         System.out.println("\n--- ScheduledExecutorService ---");
-        try (ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2)) {
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
+        try {
             // Schedule with delay
             ScheduledFuture<String> delayed = scheduler.schedule(
                     () -> "Delayed result",
                     500, TimeUnit.MILLISECONDS
             );
             System.out.println("  Scheduled result: " + delayed.get());
+        } finally {
+            scheduler.shutdown();
+            scheduler.awaitTermination(5, TimeUnit.SECONDS);
         }
 
         // --- 4. ForkJoinPool ---
@@ -71,18 +83,26 @@ public class ExecutorServiceDemo {
         long sum = pool.invoke(new SumTask(1, 1_000_000));
         System.out.println("  Sum 1..1M (ForkJoin): " + sum);
 
-        // --- 5. Virtual thread executor (Java 21) ---
-        System.out.println("\n--- Virtual Thread Executor (Java 21) ---");
-        try (ExecutorService vtExecutor = Executors.newVirtualThreadPerTaskExecutor()) {
-            for (int i = 0; i < 5; i++) {
-                final int taskId = i;
-                vtExecutor.submit(() -> {
-                    System.out.printf("  VT Task %d on %s (virtual=%b)%n",
-                            taskId, Thread.currentThread().getName(),
-                            Thread.currentThread().isVirtual());
-                });
-            }
-        }
+        // --- 5. Virtual threads (Java 21+) ---
+        // Note: Virtual threads require Java 21+.
+        // Executors.newVirtualThreadPerTaskExecutor() and Thread.isVirtual()
+        // are not available in Java 17. Uncomment below if running Java 21+.
+        // ExecutorService vtExecutor = Executors.newVirtualThreadPerTaskExecutor();
+        // try {
+        //     for (int i = 0; i < 5; i++) {
+        //         final int taskId = i;
+        //         vtExecutor.submit(() -> {
+        //             System.out.printf("  VT Task %d on %s (virtual=%b)%n",
+        //                     taskId, Thread.currentThread().getName(),
+        //                     Thread.currentThread().isVirtual());
+        //         });
+        //     }
+        // } finally {
+        //     vtExecutor.shutdown();
+        //     vtExecutor.awaitTermination(5, TimeUnit.SECONDS);
+        // }
+        System.out.println("\n--- Virtual Threads (Java 21+) ---");
+        System.out.println("  Skipped: requires Java 21+");
     }
 
     /** RecursiveTask for ForkJoinPool — sums a range of longs */

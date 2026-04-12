@@ -13,4 +13,9 @@
     <artifactId>03-java18-to-24</artifactId>
     <name>03 - Java 18 to 24 Features</name>
     <description>Modern Java features: virtual threads, record patterns, pattern matching for switch, sequenced collections</description>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+    </properties>
 </project>

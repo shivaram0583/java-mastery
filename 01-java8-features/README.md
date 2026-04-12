@@ -277,6 +277,93 @@ The new API fixes all of these: everything is **immutable**, **thread-safe**, an
 
 ---
 
+### 8. Method References
+
+**What:** Method references are a shorthand notation for lambdas that simply call an existing method. Instead of writing `x -> x.toString()`, you write `Object::toString`. They make code more readable by referring directly to the method by name.
+
+**Four types of method references:**
+
+```
+  ┌────────────────────────────────────────────────────────────────────────────┐
+  │  Type                │ Syntax              │ Lambda Equivalent            │
+  ├──────────────────────┼─────────────────────┼──────────────────────────────┤
+  │ Static method        │ Class::staticMethod │ (args) -> Class.staticMethod │
+  │                      │ Integer::parseInt   │ s -> Integer.parseInt(s)     │
+  ├──────────────────────┼─────────────────────┼──────────────────────────────┤
+  │ Instance method      │ obj::instanceMethod │ (args) -> obj.method(args)   │
+  │ (bound)              │ System.out::println │ x -> System.out.println(x)   │
+  ├──────────────────────┼─────────────────────┼──────────────────────────────┤
+  │ Instance method      │ Class::instanceMeth │ (obj,args) -> obj.method()   │
+  │ (unbound/arbitrary)  │ String::length      │ s -> s.length()              │
+  ├──────────────────────┼─────────────────────┼──────────────────────────────┤
+  │ Constructor          │ Class::new          │ (args) -> new Class(args)    │
+  │                      │ ArrayList::new      │ () -> new ArrayList<>()      │
+  └────────────────────────────────────────────────────────────────────────────┘
+```
+
+**When to prefer method references:**
+- When the lambda body is just a single method call with no additional logic
+- Method references are generally more readable for simple operations
+- The compiler can sometimes optimize method references better than lambdas
+
+**When to stick with lambdas:**
+- When you need to add logic (e.g., `x -> x.length() > 5`)
+- When the method reference would be ambiguous or less readable
+- When you need to adapt parameters (reorder, combine, etc.)
+
+---
+
+### 9. Effectively Final Variables in Lambdas
+
+**What:** A lambda expression can access local variables from its enclosing scope, but only if those variables are **effectively final** — meaning they are never modified after initialization (even if not declared `final`).
+
+```java
+String prefix = "Hello";   // effectively final — never reassigned
+// prefix = "Hi";          // un-commenting this would make it NOT effectively final
+
+Consumer<String> greeter = name -> System.out.println(prefix + " " + name);
+greeter.accept("Alice");   // prints "Hello Alice"
+```
+
+**Why this restriction exists:** Lambdas can outlive the method that created them (e.g., stored in a field, passed to another thread). Local variables live on the stack and are destroyed when the method returns. The lambda captures a *copy* of the variable's value. If the variable could change after capture, the copy and original would diverge, causing confusing bugs.
+
+**Workaround for mutable state:** If you need to accumulate results inside a lambda, use:
+- An `AtomicInteger` / `AtomicReference` (for simple cases)
+- An array or collection (mutating the contents, not the reference)
+- Stream's `reduce()` or `collect()` (the recommended functional approach)
+
+---
+
+## Internal Workings: How Lambdas Are Implemented
+
+Understanding how lambdas work under the hood is valuable for interviews and performance tuning.
+
+**Key insight:** Lambdas in Java are NOT anonymous inner classes. They use `invokedynamic` (a JVM bytecode instruction introduced in Java 7) which defers the creation strategy to runtime.
+
+```
+  Source code:                          Bytecode generated:
+  ┌──────────────────────┐             ┌──────────────────────────────┐
+  │ Runnable r =         │ ──javac──► │ invokedynamic                │
+  │   () -> print("hi"); │             │   bootstrap: LambdaMetafact │
+  └──────────────────────┘             └──────────────────────────────┘
+                                               │
+                                               ▼ (at first invocation)
+                                       ┌──────────────────────────────┐
+                                       │ LambdaMetafactory generates  │
+                                       │ a lightweight class (no .class│
+                                       │ file on disk) that implements │
+                                       │ the functional interface     │
+                                       └──────────────────────────────┘
+```
+
+**Performance advantage over anonymous inner classes:**
+1. No `.class` file generated per lambda (anonymous classes create one)
+2. No object creation overhead in many cases (JVM can optimize to singleton)
+3. The JVM can choose the best implementation strategy at runtime
+4. Better inlining by the JIT compiler
+
+---
+
 ## File Overview
 
 | Topic | Demo Class | Test Class |
@@ -288,3 +375,343 @@ The new API fixes all of these: everything is **immutable**, **thread-safe**, an
 | Date/Time API | `DateTimeApiDemo.java` | `DateTimeApiTest.java` |
 | Collectors | `CollectorsDemo.java` | `CollectorsTest.java` |
 | Functional Interfaces | `FunctionalInterfacesDemo.java` | `FunctionalInterfacesTest.java` |
+| Method References | `MethodReferencesDemo.java` | `MethodReferencesTest.java` |
+| Practice Problems | `Java8PracticeProblems.java` | `Java8PracticeTest.java` |
+
+---
+
+## Interview Questions
+
+### Lambda & Functional Interfaces
+
+**Q1: What is a lambda expression in Java 8? How does it differ from an anonymous inner class?**
+
+A lambda is a concise way to represent a single-method interface implementation. Key differences:
+- **Syntax:** Lambdas are shorter (`(a, b) -> a + b` vs multi-line anonymous class)
+- **`this` keyword:** In a lambda, `this` refers to the enclosing class. In an anonymous inner class, `this` refers to the anonymous class itself
+- **Implementation:** Lambdas use `invokedynamic` bytecode; anonymous classes generate a separate `.class` file
+- **Scope:** Lambdas do not introduce a new scope for variable names; anonymous classes do
+- **Performance:** Lambdas are generally more efficient due to JVM optimizations
+
+**Q2: What is a functional interface? Can it have more than one method?**
+
+A functional interface has exactly **one abstract method** (SAM — Single Abstract Method). However, it CAN have:
+- Multiple `default` methods (with implementations)
+- Multiple `static` methods
+- Methods inherited from `Object` (`equals`, `hashCode`, `toString`)
+
+Examples: `Runnable` (one `run()`), `Comparator` (one `compare()`, plus `default reversed()`, etc.)
+
+**Q3: What is the difference between `Predicate`, `Function`, `Consumer`, and `Supplier`?**
+
+| Interface | Input | Output | Method | Purpose |
+|-----------|-------|--------|--------|---------|
+| `Predicate<T>` | T | boolean | `test(T)` | Test a condition |
+| `Function<T,R>` | T | R | `apply(T)` | Transform a value |
+| `Consumer<T>` | T | void | `accept(T)` | Consume (side effect) |
+| `Supplier<T>` | none | T | `get()` | Produce/create a value |
+
+**Q4: What does "effectively final" mean? Why is it required for lambdas?**
+
+A variable is "effectively final" if it is never reassigned after initialization. Lambdas capture a *copy* of local variables. If the variable could change, the copy and original would diverge, leading to confusing behavior — especially when the lambda executes on a different thread.
+
+**Q5: Explain the four types of method references with examples.**
+
+1. **Static:** `Integer::parseInt` → `s -> Integer.parseInt(s)`
+2. **Bound instance:** `System.out::println` → `x -> System.out.println(x)`
+3. **Unbound instance:** `String::toUpperCase` → `s -> s.toUpperCase()`
+4. **Constructor:** `ArrayList::new` → `() -> new ArrayList<>()`
+
+**Q6: Can a lambda expression throw a checked exception?**
+
+Only if the target functional interface's abstract method declares the exception. Standard functional interfaces (`Predicate`, `Function`, etc.) do NOT declare checked exceptions. To handle checked exceptions in lambdas, you must either:
+- Catch the exception inside the lambda and wrap it in an unchecked exception
+- Create a custom functional interface that declares the exception
+- Use a utility wrapper method
+
+**Q7: What is the difference between `Function.compose()` and `Function.andThen()`?**
+
+Both chain two functions, but in different order:
+- `f.compose(g)` → applies `g` first, then `f`: `f(g(x))`
+- `f.andThen(g)` → applies `f` first, then `g`: `g(f(x))`
+
+---
+
+### Stream API
+
+**Q8: What is the difference between intermediate and terminal operations?**
+
+| Aspect | Intermediate | Terminal |
+|--------|-------------|---------|
+| Returns | Another Stream | A non-Stream result (or void) |
+| Execution | **Lazy** — nothing happens | **Triggers** pipeline execution |
+| Examples | filter, map, sorted, distinct | collect, forEach, reduce, count |
+| Chaining | Can chain multiple | Only one per pipeline |
+
+**Q9: What is lazy evaluation in streams? Why is it important?**
+
+Intermediate operations don't execute until a terminal operation is invoked. This enables:
+- **Short-circuiting:** `findFirst()` stops processing after the first match
+- **Fusion:** Multiple operations can be combined into a single pass
+- **Avoiding unnecessary work:** If a terminal operation only needs 3 elements, only 3 elements pass through the pipeline
+
+**Q10: What is the difference between `map()` and `flatMap()`?**
+
+- `map(f)` applies function f to each element, producing a 1:1 mapping: `Stream<T>` → `Stream<R>`
+- `flatMap(f)` applies function f that returns a Stream for each element, then flattens all resulting streams into one: `Stream<T>` → `Stream<R>` (one-to-many mapping)
+
+```java
+// map: ["Hello", "World"] → ["Hello", "World"] (1:1)
+list.stream().map(String::toUpperCase)
+
+// flatMap: ["Hello World", "Foo Bar"] → ["Hello", "World", "Foo", "Bar"] (1:many)
+list.stream().flatMap(s -> Arrays.stream(s.split(" ")))
+```
+
+**Q11: Can you reuse a stream? What happens if you try?**
+
+No. A stream can only be consumed once. Calling a terminal operation "closes" the stream. Any subsequent operation throws `IllegalStateException`. To process the same data again, create a new stream from the source.
+
+**Q12: What is the difference between `findFirst()` and `findAny()`?**
+
+- `findFirst()` — Always returns the first element in encounter order. In parallel streams, this may require synchronization.
+- `findAny()` — Returns any element, allowing better performance in parallel streams since it doesn't enforce ordering.
+
+**Q13: Explain `reduce()` with an example. What is the identity value?**
+
+`reduce` combines all elements into a single result using an associative accumulator function.
+```java
+int sum = numbers.stream().reduce(0, Integer::sum);
+// 0 is the identity (starting value)
+// Integer::sum is the accumulator
+// For an empty stream, reduce returns the identity value (0)
+```
+The identity value must satisfy: `accumulator.apply(identity, x) == x` for all x.
+
+**Q14: When should you use parallel streams? What are the pitfalls?**
+
+**Use when:**
+- Data set is large (>10,000 elements)
+- Operations are CPU-bound and stateless
+- Source supports efficient splitting (ArrayList, arrays — NOT LinkedList)
+
+**Avoid when:**
+- Operations involve I/O (network, file) — blocks shared ForkJoinPool threads
+- Order matters and using `forEach` (use `forEachOrdered` instead)
+- Shared mutable state is involved (race conditions)
+- Data set is small (parallelization overhead exceeds benefit)
+
+**Q15: What is the difference between `Stream.of()` and `Arrays.stream()`?**
+
+- `Stream.of(1, 2, 3)` — Creates a stream from var-args or a single element
+- `Arrays.stream(arr)` — Creates a stream from an array. For primitive arrays, returns `IntStream`/`LongStream`/`DoubleStream` (no boxing overhead)
+- `Stream.of(intArray)` on a primitive array creates `Stream<int[]>` (one element) — a common bug!
+
+**Q16: How does `Collectors.groupingBy` work? Can you nest collectors?**
+
+`groupingBy(classifier)` groups stream elements by a key function, producing a `Map<K, List<V>>`. You can nest downstream collectors:
+```java
+// Group by department, then count employees per department
+employees.stream()
+    .collect(Collectors.groupingBy(
+        Employee::getDepartment,    // classifier
+        Collectors.counting()       // downstream collector
+    ));
+// Result: {Engineering=5, Sales=3, Marketing=2}
+```
+You can nest as deep as needed: `groupingBy(dept, groupingBy(level, counting()))`.
+
+**Q17: What is the difference between `Collection.stream()` and `Collection.parallelStream()`?**
+
+`stream()` creates a sequential stream processed on the calling thread. `parallelStream()` creates a parallel stream that splits the workload across threads in `ForkJoinPool.commonPool()`. You can also convert: `stream.parallel()` and `parallelStream().sequential()`.
+
+---
+
+### Optional
+
+**Q18: What is Optional and why was it introduced?**
+
+`Optional<T>` is a container that explicitly represents the absence of a value instead of using `null`. It was introduced to:
+- Reduce `NullPointerException` by making the absence explicit
+- Force callers to handle the "no value" case
+- Provide a fluent API for value transformation and fallback
+
+**Q19: What is the difference between `orElse()` and `orElseGet()`?**
+
+- `orElse(value)` — **Always** evaluates its argument, even if the Optional has a value. If the fallback is expensive (e.g., a database call), this wastes resources.
+- `orElseGet(supplier)` — **Lazily** evaluates the supplier only if the Optional is empty. Use this for expensive fallback operations.
+
+```java
+// BAD: createDefaultUser() is called EVEN WHEN user exists
+Optional<User> opt = findUser(id);
+User user = opt.orElse(createDefaultUser());      // always called!
+
+// GOOD: createDefaultUser() is called only when needed
+User user = opt.orElseGet(() -> createDefaultUser()); // lazy
+```
+
+**Q20: Should you use Optional for method parameters or fields?**
+
+**No.** Optional was designed only as a **return type** for methods that might not return a value. Using it for fields or method parameters:
+- Adds unnecessary wrapping overhead
+- Makes serialization problematic (Optional is not `Serializable`)
+- Violates the API design intent stated by the Optional's creator (Brian Goetz)
+
+**Q21: How do you convert a stream of Optionals to a stream of present values?**
+
+```java
+// Java 8:
+stream.filter(Optional::isPresent).map(Optional::get)
+
+// Java 9+:
+stream.flatMap(Optional::stream)  // much cleaner!
+```
+
+---
+
+### Date/Time API
+
+**Q22: Why was a new Date/Time API introduced in Java 8?**
+
+The old `java.util.Date` and `Calendar` had serious flaws:
+- **Mutable** — Date objects could be changed after creation (thread-unsafe)
+- **Confusing API** — Months were 0-indexed (January = 0), years offset from 1900
+- **No timezone separation** — `Date` mixed date, time, and timezone representation
+- **Thread-unsafe formatting** — `SimpleDateFormat` was not thread-safe
+- **No duration/period concept** — No built-in way to represent "3 hours" or "2 months"
+
+The new `java.time` API (based on Joda-Time) fixes all of these with immutable, thread-safe classes.
+
+**Q23: What is the difference between `LocalDateTime` and `ZonedDateTime`?**
+
+- `LocalDateTime` — Date + time WITHOUT timezone information. Use for local events (meetings, birthdays) where timezone doesn't matter.
+- `ZonedDateTime` — Date + time + timezone. Use for timestamps that need to be compared across regions (flight schedules, API timestamps, log entries).
+
+Rule of thumb: If the event happens at the same **wall-clock time** everywhere, use `LocalDateTime`. If it happens at the same **instant** everywhere, use `ZonedDateTime` or `Instant`.
+
+**Q24: What is the difference between `Duration` and `Period`?**
+
+- `Duration` — Time-based amount measured in seconds and nanoseconds. For hours, minutes, seconds. Used with `LocalTime`, `LocalDateTime`, `Instant`.
+- `Period` — Date-based amount measured in years, months, days. For calendar differences. Used with `LocalDate`, `LocalDateTime`.
+
+```java
+Duration d = Duration.ofHours(3);           // 3 hours (10800 seconds)
+Period p = Period.of(1, 2, 15);             // 1 year, 2 months, 15 days
+```
+
+**Q25: How is `DateTimeFormatter` different from `SimpleDateFormat`?**
+
+| Feature | `DateTimeFormatter` | `SimpleDateFormat` |
+|---------|-------------------|--------------------|
+| Thread-safe | **Yes** (immutable) | **No** |
+| Package | `java.time.format` | `java.text` |
+| Works with | `java.time` classes | `java.util.Date` |
+| Parsing | Strict by default | Lenient by default |
+
+---
+
+### Default Methods & Collectors (Interview Questions)
+
+**Q26: What is the diamond problem with default methods? How does Java resolve it?**
+
+If a class implements two interfaces that both provide the same default method, it's a compile-time error. The class MUST override the method and explicitly choose which implementation to use:
+```java
+interface A { default void hello() { System.out.println("A"); } }
+interface B { default void hello() { System.out.println("B"); } }
+
+class C implements A, B {
+    @Override
+    public void hello() {
+        A.super.hello(); // explicitly choose A's implementation
+    }
+}
+```
+
+**Q27: Can default methods override methods from `Object`?**
+
+No. Default methods cannot override `equals()`, `hashCode()`, or `toString()` from `Object`. The `Object` methods always take precedence. This is because every class already inherits from `Object`, and allowing interfaces to override these methods would create ambiguity.
+
+**Q28: What happens when `Collectors.toMap()` encounters duplicate keys?**
+
+It throws `IllegalStateException` with the message "Duplicate key". To handle duplicates, provide a merge function:
+```java
+// Keep the first value for duplicate keys
+.collect(Collectors.toMap(keyFn, valueFn, (existing, replacement) -> existing));
+
+// Combine values for duplicate keys
+.collect(Collectors.toMap(keyFn, valueFn, (v1, v2) -> v1 + ", " + v2));
+```
+
+**Q29: What is the difference between `Collectors.toList()` and `Collectors.toUnmodifiableList()`?**
+
+- `toList()` — Returns a mutable `ArrayList` (can add/remove elements later)
+- `toUnmodifiableList()` (Java 10+) — Returns an unmodifiable list. Any attempt to modify it throws `UnsupportedOperationException`. Also does not allow `null` elements.
+- `Stream.toList()` (Java 16+) — Returns an unmodifiable list (shorthand for `collect(Collectors.toUnmodifiableList())`)
+
+---
+
+## Practice Problems
+
+These problems are implemented in `Java8PracticeProblems.java` with tests in `Java8PracticeTest.java`.
+
+### Easy (Warm-up)
+1. **Filter and Transform:** Given a list of strings, return a list of strings that start with "A", converted to uppercase.
+2. **Sum of Squares:** Given a list of integers, find the sum of squares of all odd numbers.
+3. **Longest String:** Find the longest string in a list using streams. Return Optional.
+4. **Comma Joining:** Join a list of strings with commas using `Collectors.joining()`.
+5. **Count Elements:** Count how many strings in a list have length > 5.
+
+### Medium (Core Skills)
+6. **Flatten Nested Lists:** Given a `List<List<Integer>>`, flatten it to a single `List<Integer>` and remove duplicates, sorted in ascending order.
+7. **Word Frequency Counter:** Given a sentence (String), return a `Map<String, Long>` of word frequencies (case-insensitive).
+8. **Group by First Letter:** Given a list of names, group them by their first character. Return `Map<Character, List<String>>`.
+9. **Second Highest:** Find the second highest number in a list using streams. Return `OptionalInt`.
+10. **Partition by Condition:** Partition a list of integers into even and odd numbers using `Collectors.partitioningBy()`.
+11. **Custom Collector:** Create a list of employees and find the employee with the highest salary per department using `Collectors.groupingBy` with `Collectors.maxBy`.
+12. **Map Inversion:** Given a `Map<String, Integer>`, create the inverse `Map<Integer, List<String>>` using streams.
+
+### Hard (Interview Level)
+13. **Fibonacci with Streams:** Generate the first N Fibonacci numbers using `Stream.iterate()` or `Stream.generate()`.
+14. **Parallel Processing:** Given a large list of numbers, use parallel streams to find the sum of cubes of all prime numbers. Compare performance with sequential streams.
+15. **Custom Functional Interface:** Create a `TriFunction<A, B, C, R>` interface that takes three arguments and returns a result. Demonstrate composition with `andThen`.
+16. **Stream from Iterator:** Convert an `Iterator<T>` to a `Stream<T>` using `Spliterator` and `StreamSupport`.
+17. **Sliding Window Average:** Implement a method that computes the sliding window average of a list of doubles with a given window size, using streams.
+18. **Transaction Analysis:** Given a list of transactions (amount, date, category), use streams to:
+    - Find the month with the highest total spending
+    - Find the top 3 categories by total amount
+    - Compute month-over-month spending growth percentages
+
+### Challenge Problems
+19. **Implement `map` using `reduce`:** Implement `Stream.map()` functionality using only `Stream.reduce()`.
+20. **Parallel Word Count from Files:** Given a list of file paths, use parallel streams to count total word occurrences across all files.
+21. **Build a Query DSL:** Create a fluent API using lambda chains that can filter, sort, and limit a dataset (like a simple SQL SELECT).
+22. **Reactive-style Pipeline:** Build an event processing pipeline using `Consumer` chains that can filter, transform, and route events to different handlers based on event type.
+
+---
+
+## Common Mistakes Cheat Sheet
+
+| Mistake | Problem | Fix |
+|---------|---------|-----|
+| `stream.forEach(list::add)` | Side-effect in stream, not thread-safe with parallel | Use `collect(toList())` |
+| `optional.get()` without check | `NoSuchElementException` at runtime | Use `orElse()`, `orElseGet()`, `orElseThrow()` |
+| `Optional.of(null)` | `NullPointerException` | Use `Optional.ofNullable(null)` |
+| Reusing a consumed stream | `IllegalStateException` | Create a new stream from the source |
+| Modifying source during stream | `ConcurrentModificationException` | Collect to new collection, then modify |
+| `parallel()` for I/O operations | Blocks shared ForkJoinPool threads | Use custom executor or virtual threads |
+| `new Date()` in new code | Uses legacy mutable API | Use `LocalDate.now()`, `Instant.now()` |
+| `SimpleDateFormat` shared across threads | Race conditions, garbled output | Use `DateTimeFormatter` (thread-safe) |
+
+---
+
+## Quick Reference Card
+
+```
+Lambda:          (params) -> expression | (params) -> { statements; }
+Method Ref:      Class::staticMethod | obj::method | Class::instanceMethod | Class::new
+Stream:          source.stream().intermediate().terminal()
+Optional:        Optional.of(v) | .ofNullable(v) | .empty() → .map() → .orElse()
+Date/Time:       LocalDate.now() | LocalTime.now() | LocalDateTime.now() | ZonedDateTime.now()
+Collectors:      toList() | toSet() | toMap() | groupingBy() | partitioningBy() | joining()
+Functional:      Predicate<T> | Function<T,R> | Consumer<T> | Supplier<T>
+```
