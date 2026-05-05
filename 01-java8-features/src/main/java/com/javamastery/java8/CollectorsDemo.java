@@ -30,7 +30,7 @@ public class CollectorsDemo {
         // --- 1. toList, toSet, toUnmodifiableList ---
         List<String> nameList = products.stream()
                 .map(Product::name)
-                .collect(Collectors.toList());
+                .toList();
         System.out.println("Names (list): " + nameList);
 
         Set<String> categorySet = products.stream()
